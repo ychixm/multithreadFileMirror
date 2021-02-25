@@ -5,6 +5,7 @@ from Directory import Directory
 from File import File
 from talk_to_ftp import TalkToFTP
 import threading as th
+import queue
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
@@ -58,42 +59,22 @@ class DirectoryManager:
     def create_dir(self, srv_full_path):
         self.ftp.create_folder(srv_full_path)
 
-    def launch_files(self, file_path, path_file, file_name):
-        # get depth of the current file by the count of the os separator in a path
-        # and compare it with the count of the root directory
-        if self.is_superior_max_depth(file_path) is False and \
-                (self.contain_excluded_extensions(file_path) is False):
-
-            self.paths_explored.append(file_path)
-            # try if already in the dictionary
-            if file_path in self.synchronize_dict.keys():
-
-                # if yes and he get updated, we update this file on the FTP server
-                if self.synchronize_dict[file_path].update_instance() == 1:
-                    # file get updates
-                    split_path = file_path.split(self.root_directory)
-                    srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
-                    self.ftp.remove_file(srv_full_path)
-                    # update this file on the FTP server
-                    self.ftp.file_transfer(path_file, srv_full_path, file_name)
-
-            else:
-
-                # file get created
-                self.synchronize_dict[file_path] = File(file_path)
-                split_path = file_path.split(self.root_directory)
-                srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
-                # add this file on the FTP server
-                self.ftp.file_transfer(path_file, srv_full_path, file_name)
+    def update_file(self, m_queue):
+        while m_queue.empty():
+            continue
+        tmp = m_queue.get()
+        local_ftp = TalkToFTP(
+            "localhost,admin,admin,default")
+        local_ftp.connect()
+        local_ftp.file_transfer(tmp[0], tmp[1], tmp[2])
+        local_ftp.disconnect()
 
     def search_updates(self, directory):
         # scan recursively all files & directories in the root directory
 
         for path_file, dirs, files in os.walk(directory):
-
-            threadsDir = []
-            threadsFile = []
-
+            m_queue = queue.Queue()
+            threads = []
             for dir_name in dirs:
                 folder_path = os.path.join(path_file, dir_name)
 
@@ -115,15 +96,15 @@ class DirectoryManager:
                         srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                         directory_split = srv_full_path.rsplit(os.path.sep, 1)[0]
                         if not self.ftp.if_exist(srv_full_path, self.ftp.get_folder_content(directory_split)):
-                            threadsDir.append(th.Thread(target=self.create_dir, args=(srv_full_path,)))
-                            threadsDir.append(th.Thread(target=self.create_dir, args=(srv_full_path,)))
-                            threadsDir[-1].start()
+                            threads.append(th.Thread(target=self.create_dir, args=(srv_full_path,)))
+                            threads[-1].start()
 
                             # add this directory to the FTP server
                             # self.ftp.create_folder(srv_full_path)
-            if not threadsDir:
-                for threads in threadsDir:
+            if not threads:
+                for threads in threads:
                     threads.join()
+            threads.clear()
 
             for file_name in files:
                 file_path = os.path.join(path_file, file_name)
@@ -144,7 +125,9 @@ class DirectoryManager:
                             srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                             self.ftp.remove_file(srv_full_path)
                             # update this file on the FTP server
-                            self.ftp.file_transfer(path_file, srv_full_path, file_name)
+                            m_queue.put((path_file, srv_full_path, file_name))
+                            threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
+                            threads[-1].start()
 
                     else:
 
@@ -153,7 +136,14 @@ class DirectoryManager:
                         split_path = file_path.split(self.root_directory)
                         srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                         # add this file on the FTP server
-                        self.ftp.file_transfer(path_file, srv_full_path, file_name)
+                        m_queue.put((path_file, srv_full_path, file_name))
+                        threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
+                        threads[-1].start()
+
+            if not threads:
+                for threads in threads:
+                    threads.join()
+            threads.clear()
 
     def any_removals(self):
         # if the length of the files & folders to synchronize == number of path explored
