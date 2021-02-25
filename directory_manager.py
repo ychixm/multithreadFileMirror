@@ -6,12 +6,16 @@ from File import File
 from talk_to_ftp import TalkToFTP
 import threading as th
 import queue
+from ThreadsManager import *
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 
 class DirectoryManager:
     def __init__(self, ftp_website, directory, depth, excluded_extensions):
+        print(ftp_website)
+        self.threads_manager = ThreadsManager(ftp_website,5)
+
         self.root_directory = directory
         self.depth = depth
         # list of the extensions to exclude during synchronization
@@ -56,20 +60,8 @@ class DirectoryManager:
             # wait before next synchronization
             time.sleep(frequency)
 
-    def create_dir(self, srv_full_path):
-        self.ftp.create_folder(srv_full_path)
-
-    def update_file(self, m_queue):
-        while m_queue.empty():
-            continue
-        tmp = m_queue.get()
-        local_ftp = TalkToFTP(
-            "localhost,admin,admin,default")
-        local_ftp.connect()
-        local_ftp.file_transfer(tmp[0], tmp[1], tmp[2])
-        local_ftp.disconnect()
-
     def search_updates(self, directory):
+
         # scan recursively all files & directories in the root directory
 
         for path_file, dirs, files in os.walk(directory):
@@ -96,11 +88,14 @@ class DirectoryManager:
                         srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                         directory_split = srv_full_path.rsplit(os.path.sep, 1)[0]
                         if not self.ftp.if_exist(srv_full_path, self.ftp.get_folder_content(directory_split)):
-                            threads.append(th.Thread(target=self.create_dir, args=(srv_full_path,)))
-                            threads[-1].start()
-
+                            self.threads_manager.add_in_queue("create_dir", srv_full_path)
+                            continue
+                            # TODO : remove this when all done
+                            # threads.append(th.Thread(target=self.create_dir, args=(srv_full_path,)))
+                            # threads[-1].start()
                             # add this directory to the FTP server
                             # self.ftp.create_folder(srv_full_path)
+
             if not threads:
                 for threads in threads:
                     threads.join()
@@ -125,9 +120,12 @@ class DirectoryManager:
                             srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                             self.ftp.remove_file(srv_full_path)
                             # update this file on the FTP server
-                            m_queue.put((path_file, srv_full_path, file_name))
-                            threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
-                            threads[-1].start()
+                            self.threads_manager.add_in_queue(("file_transfer", path_file, srv_full_path, file_name))
+                            continue
+                            # TODO : remove this when all done
+                            # m_queue.put((path_file, srv_full_path, file_name))
+                            # threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
+                            # threads[-1].start()
 
                     else:
 
@@ -136,9 +134,12 @@ class DirectoryManager:
                         split_path = file_path.split(self.root_directory)
                         srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                         # add this file on the FTP server
-                        m_queue.put((path_file, srv_full_path, file_name))
-                        threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
-                        threads[-1].start()
+                        self.threads_manager.add_in_queue(("file_transfer", path_file, srv_full_path, file_name))
+                        continue
+                        # TODO : remove this when all done
+                        # m_queue.put((path_file, srv_full_path, file_name))
+                        # threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
+                        # threads[-1].start()
 
             if not threads:
                 for threads in threads:
