@@ -12,9 +12,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 
 
 class DirectoryManager:
-    def __init__(self, ftp_website, directory, depth, excluded_extensions):
+    def __init__(self, ftp_website, directory, depth, excluded_extensions, nb_multi):
         print(ftp_website)
-        self.threads_manager = ThreadsManager(ftp_website,5)
+        self.threads_manager = ThreadsManager(ftp_website, nb_multi)
 
         self.root_directory = directory
         self.depth = depth
@@ -65,8 +65,6 @@ class DirectoryManager:
         # scan recursively all files & directories in the root directory
 
         for path_file, dirs, files in os.walk(directory):
-            m_queue = queue.Queue()
-            threads = []
             for dir_name in dirs:
                 folder_path = os.path.join(path_file, dir_name)
 
@@ -87,19 +85,10 @@ class DirectoryManager:
                         split_path = folder_path.split(self.root_directory)
                         srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                         directory_split = srv_full_path.rsplit(os.path.sep, 1)[0]
+                        print(directory_split)
                         if not self.ftp.if_exist(srv_full_path, self.ftp.get_folder_content(directory_split)):
-                            self.threads_manager.add_in_queue("create_dir", srv_full_path)
+                            self.threads_manager.add_in_queue(("create_dir", srv_full_path))
                             continue
-                            # TODO : remove this when all done
-                            # threads.append(th.Thread(target=self.create_dir, args=(srv_full_path,)))
-                            # threads[-1].start()
-                            # add this directory to the FTP server
-                            # self.ftp.create_folder(srv_full_path)
-
-            if not threads:
-                for threads in threads:
-                    threads.join()
-            threads.clear()
 
             for file_name in files:
                 file_path = os.path.join(path_file, file_name)
@@ -118,14 +107,10 @@ class DirectoryManager:
                             # file get updates
                             split_path = file_path.split(self.root_directory)
                             srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
-                            self.ftp.remove_file(srv_full_path)
+                            self.threads_manager.add_in_queue(("remove_file", srv_full_path))
                             # update this file on the FTP server
-                            self.threads_manager.add_in_queue(("file_transfer", path_file, srv_full_path, file_name))
+                            self.threads_manager.add_in_queue(("create_file", path_file, srv_full_path, file_name))
                             continue
-                            # TODO : remove this when all done
-                            # m_queue.put((path_file, srv_full_path, file_name))
-                            # threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
-                            # threads[-1].start()
 
                     else:
 
@@ -134,17 +119,8 @@ class DirectoryManager:
                         split_path = file_path.split(self.root_directory)
                         srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
                         # add this file on the FTP server
-                        self.threads_manager.add_in_queue(("file_transfer", path_file, srv_full_path, file_name))
+                        self.threads_manager.add_in_queue(("create_file", path_file, srv_full_path, file_name))
                         continue
-                        # TODO : remove this when all done
-                        # m_queue.put((path_file, srv_full_path, file_name))
-                        # threads.append(th.Thread(target=self.update_file, args=(m_queue,)))
-                        # threads[-1].start()
-
-            if not threads:
-                for threads in threads:
-                    threads.join()
-            threads.clear()
 
     def any_removals(self):
         # if the length of the files & folders to synchronize == number of path explored
@@ -164,7 +140,7 @@ class DirectoryManager:
                 if isinstance(self.synchronize_dict[removed_path], File):
                     split_path = removed_path.split(self.root_directory)
                     srv_full_path = '{}{}'.format(self.ftp.directory, split_path[1])
-                    self.ftp.remove_file(srv_full_path)
+                    self.threads_manager.add_in_queue(("remove_file", srv_full_path))
                     self.to_remove_from_dict.append(removed_path)
 
                 elif isinstance(self.synchronize_dict[removed_path], Directory):
@@ -204,14 +180,14 @@ class DirectoryManager:
             for to_delete in sorted_containers[i]:
                 to_delete_ftp = "{0}{1}{2}".format(self.ftp.directory, os.path.sep, to_delete.split(self.root_directory)[1])
                 if isinstance(self.synchronize_dict[to_delete], File):
-                    self.ftp.remove_file(to_delete_ftp)
+                    self.threads_manager.add_in_queue(("remove_file", to_delete_ftp))
                     self.to_remove_from_dict.append(to_delete)
                 else:
                     # if it's again a directory, we delete all his containers also
                     self.remove_all_in_directory(to_delete, to_delete_ftp, path_removed_list)
         # once all the containers of the directory got removed
         # we can delete the directory also
-        self.ftp.remove_folder(srv_full_path)
+        self.threads_manager.add_in_queue(("remove_dir", srv_full_path))
         self.to_remove_from_dict.append(removed_directory)
 
     # subtract current number of os separator to the number of os separator for the root directory

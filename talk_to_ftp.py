@@ -51,5 +51,3 @@ class TalkToFTP:
             return True
         else:
             return False
-
-
