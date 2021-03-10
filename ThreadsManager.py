@@ -15,12 +15,14 @@ def request_executor(credential, m_queue):
     :param m_queue: a synchronized queue where the command are placed.
     """
     local_ftp = TalkToFTP(credential)
-    # TalkToFTP("localhost,admin,admin,default")
 
     alive = True
     while alive:
         if m_queue.empty():
-            if randint(0, pow(10, 8)) == 42:
+            """
+            this part is a ping every 5 mins to be sure that the server is still alive
+            """
+            if (int(time.time()*1000)) % 300000 == 0:
                 try:
                     local_ftp.connect()
                     local_ftp.get_folder_content("default")
@@ -91,13 +93,13 @@ class ThreadsManager:
     key : command string
     value : priority value
     """
-    __priority_values = {"end": 0, "create_file": 3, "create_dir": 1, "remove_dir": 2, "remove_file": 1}
+    __priority_values = {"end": 3, "create_file": 2, "create_dir": 1, "remove_dir": 2, "remove_file": 1}
 
     """
     key : command string
     value : number of argument + 1 (command string in the tuple)
     """
-    __number_of_arguments = {"end": 0, "create_file": 4, "create_dir": 2, "remove_dir": 2, "remove_file": 2}
+    __number_of_arguments = {"end": 1, "create_file": 4, "create_dir": 2, "remove_dir": 2, "remove_file": 2}
 
     def __init__(self, credential, number_of_threads):
         """
@@ -123,7 +125,7 @@ class ThreadsManager:
 
     def add_in_queue(self, data):
         """
-        Check if the command is known and add it to the queue, if not print an error.
+        Check if the command is known or have the right number of arguments and add it to the queue, if not print an error.
 
         :param data: Tuple with command, and data to execute the command
         """
@@ -132,6 +134,7 @@ class ThreadsManager:
             if len(data) != self.__number_of_arguments[data[0]]:
                 print("Number of argument invalid, ", len(data), " given, ", self.__number_of_arguments[data[0]],
                       "needed")
+                return
             try:
                 self.__queue.put((self.__priority_values[data[0]], data))
             except Exception as e:
